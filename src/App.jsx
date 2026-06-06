@@ -124,35 +124,7 @@ const calcAlertas = (data) => {
 
   return alertas;
 };
-  if (tio) {
-    const saldo = tio.arriendos.reduce((s, a) => s + a.monto, 0)
-      + tio.prestamos.reduce((s, l) => s + (l.pagos || []).reduce((ss, p) => ss + p.monto, 0), 0)
-      - tio.gastos.reduce((s, g) => s + g.monto, 0)
-      - tio.entregas.reduce((s, e) => s + e.monto, 0);
-    if (saldo > 0) {
-      alertas.push({ id: "tio-saldo", urgencia: "baja", icon: "👴", titulo: `Saldo pendiente por entregar a ${tio.nombre}`, detalle: `Tienes ${fmt(saldo)} por rendir`, tab: "tio" });
-    }
-  }
 
-  // ── Tarjetas de crédito ──
-  (data.accounts || []).filter(a => a.tipo === "tarjeta_credito").forEach(acc => {
-    const compras = (acc.compras || []).filter(c => calcSaldoCompra(c, acc.tasaMensual || 0) > 0);
-    if (compras.length === 0) return;
-    const { diasRestantes, fechaPago } = calcFechasPago(acc);
-    const pagoMes = compras.reduce((s, c) => s + calcCuotaMensual(c.monto, acc.tasaMensual || 0, c.cuotas), 0);
-    const saldoTotal = compras.reduce((s, c) => s + calcSaldoCompra(c, acc.tasaMensual || 0), 0);
-    const cupoUsadoPct = acc.cupoTotal > 0 ? Math.round((saldoTotal / acc.cupoTotal) * 100) : 0;
-    if (diasRestantes <= 5) {
-      alertas.push({ id: `tc-pago-${acc.id}`, urgencia: "alta", icon: "💳", titulo: `${acc.nombre} — Pago vence en ${diasRestantes} días`, detalle: `Pago del mes: ${fmt(pagoMes)} · Fecha límite: ${fmtD(fechaPago)}`, tab: "accounts" });
-    } else if (diasRestantes <= 10) {
-      alertas.push({ id: `tc-prox-${acc.id}`, urgencia: "media", icon: "💳", titulo: `${acc.nombre} — Pago en ${diasRestantes} días`, detalle: `Pago del mes: ${fmt(pagoMes)}`, tab: "accounts" });
-    }
-    if (cupoUsadoPct >= 90) {
-      alertas.push({ id: `tc-cupo-${acc.id}`, urgencia: "alta", icon: "🔴", titulo: `${acc.nombre} — Cupo casi agotado (${cupoUsadoPct}%)`, detalle: `Deuda: ${fmt(saldoTotal)} de ${fmt(acc.cupoTotal)} de cupo`, tab: "accounts" });
-    } else if (cupoUsadoPct >= 75) {
-      alertas.push({ id: `tc-cupo75-${acc.id}`, urgencia: "media", icon: "🟡", titulo: `${acc.nombre} — Cupo al ${cupoUsadoPct}%`, detalle: `Disponible: ${fmt(acc.cupoTotal - saldoTotal)}`, tab: "accounts" });
-    }
-  });
 /* ═══════════════════════════════════════
    MATEMÁTICAS TARJETA DE CRÉDITO
 ═══════════════════════════════════════ */
@@ -866,7 +838,8 @@ function Transacciones({ data, saveData }) {
   const [modal, setModal] = useState(false);
   const [editTx, setEditTx] = useState(null);
   const [filter, setFilter] = useState("todos");
-  const emptyF = { tipo: "gasto", monto: "", categoria: "comida", descripcion: "", fecha: todayStr(), esFijo: false };
+  const accounts = data.accounts || [];
+  const emptyF = { tipo: "gasto", monto: "", categoria: "comida", descripcion: "", fecha: todayStr(), esFijo: false, cuentaId: accounts[0]?.id || "", subcuentaId: "" };
   const [f, setF] = useState(emptyF);
   const m = curMonth();
   const txM = data.transactions.filter((t) => t.fecha.startsWith(m));
@@ -875,23 +848,40 @@ function Transacciones({ data, saveData }) {
   let list = [...data.transactions].sort((a, b) => b.fecha.localeCompare(a.fecha));
   if (filter !== "todos") list = list.filter((t) => t.tipo === filter);
 
+  const cuentaSeleccionada = accounts.find(a => a.id === f.cuentaId);
+  const subcuentasDisponibles = (cuentaSeleccionada?.subcuentas || []);
+
   const openEdit = (tx) => {
     setEditTx(tx.id);
-    setF({ tipo: tx.tipo, monto: String(tx.monto), categoria: tx.categoria, descripcion: tx.descripcion, fecha: tx.fecha, esFijo: tx.esFijo });
+    setF({ tipo: tx.tipo, monto: String(tx.monto), categoria: tx.categoria, descripcion: tx.descripcion, fecha: tx.fecha, esFijo: tx.esFijo, cuentaId: tx.cuentaId || "", subcuentaId: tx.subcuentaId || "" });
     setModal(true);
   };
 
   const save = () => {
     if (!f.monto || !f.descripcion) return;
     const monto = parseFloat(String(f.monto).replace(/[^0-9.]/g, "")) || 0;
-    if (editTx) {
-      saveData({ ...data, transactions: data.transactions.map((t) => t.id === editTx ? { ...t, ...f, monto } : t) });
-    } else {
-      saveData({ ...data, transactions: [{ ...f, id: uid(), monto }, ...data.transactions] });
+    const tx = { ...f, id: editTx || uid(), monto };
+
+    // Actualizar saldo de cuenta/subcuenta
+    const signo = f.tipo === "gasto" ? -1 : 1;
+    let newAccounts = accounts;
+    if (f.cuentaId && !editTx) {
+      newAccounts = accounts.map(a => {
+        if (a.id !== f.cuentaId) return a;
+        if (f.subcuentaId && (a.subcuentas || []).length > 0) {
+          const newSubs = a.subcuentas.map(s => s.id === f.subcuentaId ? { ...s, saldo: s.saldo + signo * monto } : s);
+          return { ...a, subcuentas: newSubs, saldo: newSubs.reduce((s, b) => s + b.saldo, 0) };
+        }
+        return { ...a, saldo: (a.saldo || 0) + signo * monto };
+      });
     }
-    setModal(false);
-    setEditTx(null);
-    setF(emptyF);
+
+    if (editTx) {
+      saveData({ ...data, transactions: data.transactions.map((t) => t.id === editTx ? tx : t) });
+    } else {
+      saveData({ ...data, transactions: [tx, ...data.transactions], accounts: newAccounts });
+    }
+    setModal(false); setEditTx(null); setF(emptyF);
   };
 
   const deleteTx = (id) => saveData({ ...data, transactions: data.transactions.filter((t) => t.id !== id) });
@@ -963,6 +953,18 @@ function Transacciones({ data, saveData }) {
             {CATS.map((c) => <option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
           </Sel>
           <Inp label="Fecha" type="date" value={f.fecha} onChange={(e) => setF((x) => ({ ...x, fecha: e.target.value }))} />
+          {accounts.length > 0 && (
+            <Sel label={f.tipo === "gasto" ? "¿De qué cuenta sale?" : "¿A qué cuenta entra?"} value={f.cuentaId} onChange={(e) => setF((x) => ({ ...x, cuentaId: e.target.value, subcuentaId: "" }))}>
+              <option value="">— Sin especificar —</option>
+              {accounts.filter(a => a.tipo !== "tarjeta_credito").map(a => <option key={a.id} value={a.id}>{ACCOUNT_ICONS[a.tipo]} {a.nombre}</option>)}
+            </Sel>
+          )}
+          {subcuentasDisponibles.length > 0 && (
+            <Sel label="¿De qué bolsillo?" value={f.subcuentaId} onChange={(e) => setF((x) => ({ ...x, subcuentaId: e.target.value }))}>
+              <option value="">— Cuenta general —</option>
+              {subcuentasDisponibles.map(s => <option key={s.id} value={s.id}>{s.nombre} · {fmt(s.saldo)}</option>)}
+            </Sel>
+          )}
           <label style={{ display: "flex", alignItems: "center", gap: 10, color: C.sec, fontSize: 14, marginBottom: 20, cursor: "pointer" }}>
             <input type="checkbox" checked={f.esFijo} onChange={(e) => setF((x) => ({ ...x, esFijo: e.target.checked }))} style={{ width: 18, height: 18 }} />
             Gasto / Ingreso fijo (recurrente)
