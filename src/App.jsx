@@ -93,12 +93,12 @@ const calcAlertas = (data) => {
   // ── Saldo del Tío pendiente ──
   const tio = data.tio;
   if (tio) {
-    const saldo = tio.arriendos.reduce((s, a) => s + a.monto, 0)
-      + tio.prestamos.reduce((s, l) => s + (l.pagos || []).reduce((ss, p) => ss + p.monto, 0), 0)
-      - tio.gastos.reduce((s, g) => s + g.monto, 0)
-      - tio.entregas.reduce((s, e) => s + e.monto, 0);
+    const saldo = (tio.arriendos || []).reduce((s, a) => s + a.monto, 0)
+      + (tio.prestamos || []).reduce((s, l) => s + ((l.pagos || []).reduce((ss, p) => ss + p.monto, 0)), 0)
+      - (tio.gastos || []).reduce((s, g) => s + g.monto, 0)
+      - (tio.entregas || []).reduce((s, e) => s + e.monto, 0);
     if (saldo > 0) {
-      alertas.push({ id: "tio-saldo", urgencia: "baja", icon: "👴", titulo: `Saldo pendiente por entregar a ${tio.nombre}`, detalle: `Tienes ${fmt(saldo)} por rendir`, tab: "tio" });
+      alertas.push({ id: "tio-saldo", urgencia: "baja", icon: "👴", titulo: `Saldo pendiente por entregar a ${tio.nombre || "el Tío"}`, detalle: `Tienes ${fmt(saldo)} por rendir`, tab: "tio" });
     }
   }
 
@@ -3005,10 +3005,26 @@ export default function App() {
     document.head.appendChild(link);
     try {
       const r = localStorage.getItem("miscuentas-v3");
-      const saved = r ? JSON.parse(r) : null;
-      if (saved && !saved.accounts) saved.accounts = INIT.accounts;
-      if (saved && saved.accounts) saved.accounts = saved.accounts.map(a => ({ subcuentas: [], ...a }));
-      if (saved && !saved.tio) saved.tio = JSON.parse(JSON.stringify(INIT.tio));
+      let saved = r ? JSON.parse(r) : null;
+      if (saved) {
+        // Sanitize accounts
+        if (!saved.accounts) saved.accounts = INIT.accounts;
+        saved.accounts = saved.accounts.map(a => ({ subcuentas: [], compras: [], ...a }));
+        // Sanitize tio
+        if (!saved.tio) saved.tio = JSON.parse(JSON.stringify(INIT.tio));
+        saved.tio = {
+          nombre: saved.tio.nombre || "Mi Tío",
+          prestamos: saved.tio.prestamos || [],
+          arriendos: saved.tio.arriendos || [],
+          gastos: saved.tio.gastos || [],
+          entregas: saved.tio.entregas || [],
+        };
+        // Sanitize other fields
+        if (!saved.transactions) saved.transactions = [];
+        if (!saved.loans) saved.loans = [];
+        if (!saved.budgets) saved.budgets = {};
+        if (!saved.goals) saved.goals = [];
+      }
       setData(saved || JSON.parse(JSON.stringify(INIT)));
     } catch {
       setData(JSON.parse(JSON.stringify(INIT)));
