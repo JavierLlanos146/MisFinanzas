@@ -102,11 +102,102 @@ const calcAlertas = (data) => {
     }
   }
 
+  // ── Tarjetas de crédito ──
+  (data.accounts || []).filter(a => a.tipo === "tarjeta_credito").forEach(acc => {
+    const compras = (acc.compras || []).filter(c => calcSaldoCompra(c, acc.tasaMensual || 0) > 0);
+    if (compras.length === 0) return;
+    const { diasRestantes, fechaPago } = calcFechasPago(acc);
+    const pagoMes = compras.reduce((s, c) => s + calcCuotaMensual(c.monto, acc.tasaMensual || 0, c.cuotas), 0);
+    const saldoTotal = compras.reduce((s, c) => s + calcSaldoCompra(c, acc.tasaMensual || 0), 0);
+    const cupoUsadoPct = acc.cupoTotal > 0 ? Math.round((saldoTotal / acc.cupoTotal) * 100) : 0;
+    if (diasRestantes <= 5) {
+      alertas.push({ id: `tc-pago-${acc.id}`, urgencia: "alta", icon: "💳", titulo: `${acc.nombre} — Pago vence en ${diasRestantes} días`, detalle: `Pago del mes: ${fmt(pagoMes)} · Fecha límite: ${fmtD(fechaPago)}`, tab: "accounts" });
+    } else if (diasRestantes <= 10) {
+      alertas.push({ id: `tc-prox-${acc.id}`, urgencia: "media", icon: "💳", titulo: `${acc.nombre} — Pago en ${diasRestantes} días`, detalle: `Pago del mes: ${fmt(pagoMes)}`, tab: "accounts" });
+    }
+    if (cupoUsadoPct >= 90) {
+      alertas.push({ id: `tc-cupo-${acc.id}`, urgencia: "alta", icon: "🔴", titulo: `${acc.nombre} — Cupo casi agotado (${cupoUsadoPct}%)`, detalle: `Deuda: ${fmt(saldoTotal)} de ${fmt(acc.cupoTotal)} de cupo`, tab: "accounts" });
+    } else if (cupoUsadoPct >= 75) {
+      alertas.push({ id: `tc-cupo75-${acc.id}`, urgencia: "media", icon: "🟡", titulo: `${acc.nombre} — Cupo al ${cupoUsadoPct}%`, detalle: `Disponible: ${fmt(acc.cupoTotal - saldoTotal)}`, tab: "accounts" });
+    }
+  });
+
   return alertas;
 };
+  if (tio) {
+    const saldo = tio.arriendos.reduce((s, a) => s + a.monto, 0)
+      + tio.prestamos.reduce((s, l) => s + (l.pagos || []).reduce((ss, p) => ss + p.monto, 0), 0)
+      - tio.gastos.reduce((s, g) => s + g.monto, 0)
+      - tio.entregas.reduce((s, e) => s + e.monto, 0);
+    if (saldo > 0) {
+      alertas.push({ id: "tio-saldo", urgencia: "baja", icon: "👴", titulo: `Saldo pendiente por entregar a ${tio.nombre}`, detalle: `Tienes ${fmt(saldo)} por rendir`, tab: "tio" });
+    }
+  }
+
+  // ── Tarjetas de crédito ──
+  (data.accounts || []).filter(a => a.tipo === "tarjeta_credito").forEach(acc => {
+    const compras = (acc.compras || []).filter(c => calcSaldoCompra(c, acc.tasaMensual || 0) > 0);
+    if (compras.length === 0) return;
+    const { diasRestantes, fechaPago } = calcFechasPago(acc);
+    const pagoMes = compras.reduce((s, c) => s + calcCuotaMensual(c.monto, acc.tasaMensual || 0, c.cuotas), 0);
+    const saldoTotal = compras.reduce((s, c) => s + calcSaldoCompra(c, acc.tasaMensual || 0), 0);
+    const cupoUsadoPct = acc.cupoTotal > 0 ? Math.round((saldoTotal / acc.cupoTotal) * 100) : 0;
+    if (diasRestantes <= 5) {
+      alertas.push({ id: `tc-pago-${acc.id}`, urgencia: "alta", icon: "💳", titulo: `${acc.nombre} — Pago vence en ${diasRestantes} días`, detalle: `Pago del mes: ${fmt(pagoMes)} · Fecha límite: ${fmtD(fechaPago)}`, tab: "accounts" });
+    } else if (diasRestantes <= 10) {
+      alertas.push({ id: `tc-prox-${acc.id}`, urgencia: "media", icon: "💳", titulo: `${acc.nombre} — Pago en ${diasRestantes} días`, detalle: `Pago del mes: ${fmt(pagoMes)}`, tab: "accounts" });
+    }
+    if (cupoUsadoPct >= 90) {
+      alertas.push({ id: `tc-cupo-${acc.id}`, urgencia: "alta", icon: "🔴", titulo: `${acc.nombre} — Cupo casi agotado (${cupoUsadoPct}%)`, detalle: `Deuda: ${fmt(saldoTotal)} de ${fmt(acc.cupoTotal)} de cupo`, tab: "accounts" });
+    } else if (cupoUsadoPct >= 75) {
+      alertas.push({ id: `tc-cupo75-${acc.id}`, urgencia: "media", icon: "🟡", titulo: `${acc.nombre} — Cupo al ${cupoUsadoPct}%`, detalle: `Disponible: ${fmt(acc.cupoTotal - saldoTotal)}`, tab: "accounts" });
+    }
+  });
 /* ═══════════════════════════════════════
-   COMPONENTE RECIBO (renderizado inline)
+   MATEMÁTICAS TARJETA DE CRÉDITO
 ═══════════════════════════════════════ */
+const calcCuotaMensual = (monto, tasaMensual, cuotas) => {
+  if (cuotas <= 1) return Math.round(monto);
+  const r = tasaMensual / 100;
+  if (r === 0) return Math.round(monto / cuotas);
+  return Math.round(monto * r * Math.pow(1 + r, cuotas) / (Math.pow(1 + r, cuotas) - 1));
+};
+
+const calcSaldoCompra = (compra, tasaMensual) => {
+  const r = tasaMensual / 100;
+  const M = calcCuotaMensual(compra.monto, tasaMensual, compra.cuotas);
+  const k = compra.cuotasPagadas || 0;
+  let saldo;
+  if (r === 0 || compra.cuotas <= 1) {
+    saldo = compra.monto - k * M;
+  } else {
+    saldo = compra.monto * Math.pow(1 + r, k) - M * (Math.pow(1 + r, k) - 1) / r;
+  }
+  const totalAbonos = (compra.abonosCapital || []).reduce((s, a) => s + a.monto, 0);
+  return Math.max(0, Math.round(saldo - totalAbonos));
+};
+
+const calcCuotasRestantes = (compra, tasaMensual) => {
+  const saldo = calcSaldoCompra(compra, tasaMensual);
+  if (saldo <= 0) return 0;
+  const M = calcCuotaMensual(compra.monto, tasaMensual, compra.cuotas);
+  if (M <= 0) return 0;
+  const r = tasaMensual / 100;
+  if (r === 0) return Math.ceil(saldo / M);
+  return Math.max(1, Math.ceil(Math.log(M / (M - saldo * r)) / Math.log(1 + r)));
+};
+
+const calcFechasPago = (acc) => {
+  const today = new Date();
+  const diaCorte = acc.diaCorte || 15;
+  const diasPago = acc.diasPago || 20;
+  let corte = new Date(today.getFullYear(), today.getMonth(), diaCorte);
+  if (corte <= today) corte = new Date(today.getFullYear(), today.getMonth() + 1, diaCorte);
+  const pago = new Date(corte);
+  pago.setDate(pago.getDate() + diasPago);
+  const diasRestantes = Math.ceil((pago - today) / 86400000);
+  return { fechaCorte: corte.toISOString().slice(0, 10), fechaPago: pago.toISOString().slice(0, 10), diasRestantes };
+};
 function ReciboOverlay({ loan, pago, cuentaNombre, recordatorio, onClose }) {
   const total = pago.monto;
   const fechaHoy = new Date().toLocaleDateString("es-CO", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
@@ -1442,20 +1533,31 @@ function Cuentas({ data, saveData }) {
   const [modal, setModal] = useState(false);
   const [editAcc, setEditAcc] = useState(null);
   const [transferModal, setTransferModal] = useState(false);
-  const [subModal, setSubModal] = useState(null); // accId para gestionar bolsillos
+  const [subModal, setSubModal] = useState(null);
   const [expandedAcc, setExpandedAcc] = useState({});
+  const [tarjetaDetail, setTarjetaDetail] = useState(null); // id de la tarjeta en detalle
+  const [compraModal, setCompraModal] = useState(false);
+  const [pagoModal, setPagoModal] = useState(false);
+  const [abonoModal, setAbonoModal] = useState(null); // compraId
   const accounts = data.accounts || [];
-  const emptyF = { nombre: "", tipo: "efectivo", saldo: "", color: C.green };
+  const emptyF = { nombre: "", tipo: "efectivo", saldo: "", color: C.green, cupoTotal: "", tasaMensual: "", diaCorte: "15", diasPago: "20" };
   const [f, setF] = useState(emptyF);
   const [tf, setTf] = useState({ origen: "", origenSub: "", destino: "", destinoSub: "", monto: "", nota: "" });
   const emptySf = { nombre: "", saldo: "", color: C.blue };
   const [sf, setSf] = useState(emptySf);
   const [editSub, setEditSub] = useState(null);
+  const emptyCf = { descripcion: "", monto: "", cuotas: "1", fecha: todayStr() };
+  const [cf, setCf] = useState(emptyCf);
+  const emptyPf = { tipo: "normal", monto: "", fecha: todayStr(), nota: "" };
+  const [pf, setPf] = useState(emptyPf);
 
   const COLORS = [C.green, C.blue, C.amber, C.purple, C.red, "#F472B6", "#60E1FF"];
 
-  // Saldo efectivo de una cuenta (suma bolsillos si los tiene)
   const accSaldo = (acc) => {
+    if (acc.tipo === "tarjeta_credito") {
+      const compras = (acc.compras || []);
+      return -compras.reduce((s, c) => s + calcSaldoCompra(c, acc.tasaMensual || 0), 0);
+    }
     const subs = acc.subcuentas || [];
     if (subs.length === 0) return acc.saldo;
     return subs.reduce((s, b) => s + b.saldo, 0);
@@ -1463,26 +1565,68 @@ function Cuentas({ data, saveData }) {
 
   const openEdit = (acc) => {
     setEditAcc(acc.id);
-    setF({ nombre: acc.nombre, tipo: acc.tipo, saldo: String(acc.saldo), color: acc.color });
+    setF({ nombre: acc.nombre, tipo: acc.tipo, saldo: String(acc.saldo), color: acc.color, cupoTotal: String(acc.cupoTotal || ""), tasaMensual: String(acc.tasaMensual || ""), diaCorte: String(acc.diaCorte || "15"), diasPago: String(acc.diasPago || "20") });
     setModal(true);
   };
 
   const saveAcc = () => {
     if (!f.nombre) return;
     const saldo = parseFloat(String(f.saldo).replace(/[^0-9.]/g, "")) || 0;
+    const extras = f.tipo === "tarjeta_credito" ? { cupoTotal: parseFloat(f.cupoTotal) || 0, tasaMensual: parseFloat(f.tasaMensual) || 0, diaCorte: parseInt(f.diaCorte) || 15, diasPago: parseInt(f.diasPago) || 20 } : {};
     if (editAcc) {
       const acc = accounts.find(a => a.id === editAcc);
       const hasSubs = (acc?.subcuentas || []).length > 0;
-      saveData({ ...data, accounts: accounts.map((a) => a.id === editAcc ? { ...a, ...f, saldo: hasSubs ? accSaldo(a) : saldo } : a) });
+      saveData({ ...data, accounts: accounts.map((a) => a.id === editAcc ? { ...a, ...f, ...extras, saldo: hasSubs ? accSaldo(a) : saldo } : a) });
     } else {
-      saveData({ ...data, accounts: [...accounts, { ...f, id: uid(), saldo, subcuentas: [] }] });
+      saveData({ ...data, accounts: [...accounts, { ...f, ...extras, id: uid(), saldo, subcuentas: [], compras: [] }] });
     }
-    setModal(false);
-    setEditAcc(null);
-    setF(emptyF);
+    setModal(false); setEditAcc(null); setF(emptyF);
   };
 
   const deleteAcc = (id) => saveData({ ...data, accounts: accounts.filter((a) => a.id !== id) });
+
+  // ── Compras de tarjeta ──
+  const saveCompra = () => {
+    if (!cf.descripcion || !cf.monto) return;
+    const acc = accounts.find(a => a.id === tarjetaDetail);
+    if (!acc) return;
+    const compra = { id: uid(), descripcion: cf.descripcion, monto: parseFloat(cf.monto) || 0, cuotas: parseInt(cf.cuotas) || 1, cuotasPagadas: 0, fechaCompra: cf.fecha, abonosCapital: [] };
+    saveData({ ...data, accounts: accounts.map(a => a.id === tarjetaDetail ? { ...a, compras: [...(a.compras || []), compra] } : a) });
+    setCompraModal(false); setCf(emptyCf);
+  };
+
+  // ── Pago normal (avanza cuotasPagadas en todas las compras activas) ──
+  const savePago = () => {
+    const acc = accounts.find(a => a.id === tarjetaDetail);
+    if (!acc) return;
+    const newCompras = (acc.compras || []).map(c => {
+      const restantes = calcCuotasRestantes(c, acc.tasaMensual || 0);
+      if (restantes <= 0) return c;
+      return { ...c, cuotasPagadas: (c.cuotasPagadas || 0) + 1 };
+    });
+    saveData({ ...data, accounts: accounts.map(a => a.id === tarjetaDetail ? { ...a, compras: newCompras } : a) });
+    setPagoModal(false); setPf(emptyPf);
+  };
+
+  // ── Abono a capital ──
+  const saveAbono = () => {
+    const monto = parseFloat(pf.monto) || 0;
+    if (!monto || !abonoModal) return;
+    const acc = accounts.find(a => a.id === tarjetaDetail);
+    if (!acc) return;
+    const newCompras = (acc.compras || []).map(c => {
+      if (c.id !== abonoModal) return c;
+      return { ...c, abonosCapital: [...(c.abonosCapital || []), { id: uid(), fecha: pf.fecha, monto }] };
+    });
+    saveData({ ...data, accounts: accounts.map(a => a.id === tarjetaDetail ? { ...a, compras: newCompras } : a) });
+    setAbonoModal(null); setPf(emptyPf);
+  };
+
+  const deleteCompra = (compraId) => {
+    const acc = accounts.find(a => a.id === tarjetaDetail);
+    if (!acc) return;
+    saveData({ ...data, accounts: accounts.map(a => a.id === tarjetaDetail ? { ...a, compras: (a.compras || []).filter(c => c.id !== compraId) } : a) });
+  };
 
   // ── Bolsillos ──
   const openSubModal = (accId) => {
@@ -1571,8 +1715,226 @@ function Cuentas({ data, saveData }) {
   };
 
   const total = accounts.reduce((s, a) => s + accSaldo(a), 0);
-
   const subModalAcc = accounts.find(a => a.id === subModal);
+
+  // ── Vista detalle tarjeta ──
+  if (tarjetaDetail) {
+    const acc = accounts.find(a => a.id === tarjetaDetail);
+    if (!acc) { setTarjetaDetail(null); return null; }
+    const tasa = acc.tasaMensual || 0;
+    const compras = acc.compras || [];
+    const comprasActivas = compras.filter(c => calcCuotasRestantes(c, tasa) > 0);
+    const comprasPagadas = compras.filter(c => calcCuotasRestantes(c, tasa) <= 0);
+    const saldoTotal = comprasActivas.reduce((s, c) => s + calcSaldoCompra(c, tasa), 0);
+    const pagoMes = comprasActivas.reduce((s, c) => s + calcCuotaMensual(c.monto, tasa, c.cuotas), 0);
+    const cupoDisponible = (acc.cupoTotal || 0) - saldoTotal;
+    const cupoUsadoPct = acc.cupoTotal > 0 ? Math.round((saldoTotal / acc.cupoTotal) * 100) : 0;
+    const { fechaPago, fechaCorte, diasRestantes } = calcFechasPago(acc);
+
+    return (
+      <div style={{ padding: "0 16px" }}>
+        <div style={{ padding: "52px 0 16px", display: "flex", alignItems: "center", gap: 12 }}>
+          <button onClick={() => setTarjetaDetail(null)} style={{ background: C.surf, border: "none", color: C.text, width: 36, height: 36, borderRadius: 10, cursor: "pointer", fontSize: 20 }}>←</button>
+          <div>
+            <p style={{ fontSize: 20, fontWeight: 700, ...SORA }}>💳 {acc.nombre}</p>
+            <p style={{ color: C.sec, fontSize: 13 }}>{acc.tasaMensual}% mensual · Corte día {acc.diaCorte}</p>
+          </div>
+        </div>
+
+        {/* Header card */}
+        <div style={{ background: `linear-gradient(135deg, #1a1a2e, #16213e)`, borderRadius: 20, padding: 20, marginBottom: 14, border: `1px solid ${acc.color}44` }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
+            <div>
+              <p style={{ color: C.sec, fontSize: 11, letterSpacing: 0.8 }}>DEUDA TOTAL</p>
+              <p style={{ color: C.red, fontWeight: 700, ...SORA, fontSize: 28 }}>{fmt(saldoTotal)}</p>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <p style={{ color: C.sec, fontSize: 11, letterSpacing: 0.8 }}>CUPO DISPONIBLE</p>
+              <p style={{ color: C.green, fontWeight: 700, ...SORA, fontSize: 28 }}>{fmt(cupoDisponible)}</p>
+            </div>
+          </div>
+          {acc.cupoTotal > 0 && (
+            <>
+              <ProgBar value={saldoTotal} max={acc.cupoTotal} color={cupoUsadoPct >= 90 ? C.red : cupoUsadoPct >= 75 ? C.amber : C.green} h={8} />
+              <p style={{ color: C.sec, fontSize: 11, marginTop: 4 }}>{cupoUsadoPct}% del cupo de {fmt(acc.cupoTotal)} usado</p>
+            </>
+          )}
+        </div>
+
+        {/* Próximo pago */}
+        <Card style={{ marginBottom: 12, background: diasRestantes <= 5 ? `${C.red}14` : `${C.blue}14`, border: `1px solid ${diasRestantes <= 5 ? C.red : C.blue}44` }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <p style={{ fontWeight: 700, fontSize: 14, color: diasRestantes <= 5 ? C.red : C.blue }}>
+                {diasRestantes <= 5 ? "🚨" : "📅"} Próximo pago — {diasRestantes} días
+              </p>
+              <p style={{ color: C.sec, fontSize: 12 }}>Corte: {fmtD(fechaCorte)} · Límite: {fmtD(fechaPago)}</p>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <p style={{ color: C.sec, fontSize: 11 }}>Pago del mes</p>
+              <p style={{ color: C.amber, fontWeight: 700, ...SORA, fontSize: 20 }}>{fmt(pagoMes)}</p>
+            </div>
+          </div>
+        </Card>
+
+        {/* Botones acción */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          <PrimaryBtn onClick={() => setCompraModal(true)} style={{ flex: 1, fontSize: 13 }}>+ Nueva compra</PrimaryBtn>
+          {comprasActivas.length > 0 && <PrimaryBtn onClick={() => setPagoModal(true)} color={C.green} style={{ flex: 1, fontSize: 13 }}>✓ Registrar pago</PrimaryBtn>}
+        </div>
+
+        {/* Compras activas */}
+        {comprasActivas.length > 0 && (
+          <>
+            <p style={{ fontWeight: 700, fontSize: 14, marginBottom: 10 }}>Compras activas ({comprasActivas.length})</p>
+            {comprasActivas.map(c => {
+              const cuotaMens = calcCuotaMensual(c.monto, tasa, c.cuotas);
+              const saldo = calcSaldoCompra(c, tasa);
+              const restantes = calcCuotasRestantes(c, tasa);
+              const pagadas = c.cuotas - restantes;
+              const totalIntereses = (cuotaMens * c.cuotas) - c.monto;
+              return (
+                <Card key={c.id} style={{ marginBottom: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+                    <div style={{ flex: 1 }}>
+                      <p style={{ fontWeight: 700, fontSize: 14 }}>{c.descripcion}</p>
+                      <p style={{ color: C.sec, fontSize: 12 }}>{fmtD(c.fechaCompra)} · {c.cuotas} cuotas</p>
+                    </div>
+                    <button onClick={() => deleteCompra(c.id)} style={{ background: "none", border: "none", color: C.ter, cursor: "pointer", fontSize: 14, padding: 0 }}>🗑</button>
+                  </div>
+                  <ProgBar value={pagadas} max={c.cuotas} color={acc.color} h={6} />
+                  <p style={{ color: C.sec, fontSize: 11, marginTop: 4, marginBottom: 10 }}>{pagadas} de {c.cuotas} cuotas pagadas · {restantes} restantes</p>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {[
+                      { l: "Cuota/mes", v: fmt(cuotaMens), c: C.amber },
+                      { l: "Saldo pendiente", v: fmt(saldo), c: C.red },
+                      { l: "Intereses totales", v: fmt(totalIntereses), c: C.ter },
+                    ].map(x => (
+                      <div key={x.l} style={{ background: C.surf2, borderRadius: 8, padding: "8px 10px", flex: 1, minWidth: 80 }}>
+                        <p style={{ color: C.sec, fontSize: 10 }}>{x.l}</p>
+                        <p style={{ color: x.c, fontWeight: 700, fontSize: 13 }}>{x.v}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <button onClick={() => { setAbonoModal(c.id); setPf(emptyPf); }} style={{ width: "100%", marginTop: 10, background: `${C.blue}22`, border: `0.5px solid ${C.blue}44`, color: C.blue, borderRadius: 10, padding: "9px", fontWeight: 700, fontSize: 13, cursor: "pointer", ...DM }}>
+                    💰 Abono a capital
+                  </button>
+                </Card>
+              );
+            })}
+          </>
+        )}
+
+        {/* Compras pagadas */}
+        {comprasPagadas.length > 0 && (
+          <>
+            <p style={{ fontWeight: 700, fontSize: 14, marginBottom: 10, marginTop: 8, color: C.sec }}>Pagadas ✓</p>
+            {comprasPagadas.map(c => (
+              <Card key={c.id} style={{ marginBottom: 8, opacity: 0.6, padding: "12px 14px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <div>
+                    <p style={{ fontWeight: 600, fontSize: 13 }}>{c.descripcion}</p>
+                    <p style={{ color: C.sec, fontSize: 11 }}>{c.cuotas} cuotas · {fmt(c.monto)}</p>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <Badge label="Pagada" color={C.green} />
+                    <button onClick={() => deleteCompra(c.id)} style={{ display: "block", background: "none", border: "none", color: C.ter, cursor: "pointer", fontSize: 13, marginTop: 4 }}>🗑</button>
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </>
+        )}
+
+        {compras.length === 0 && (
+          <Card style={{ textAlign: "center", padding: "36px 20px" }}>
+            <p style={{ fontSize: 36, marginBottom: 10 }}>🛍️</p>
+            <p style={{ fontWeight: 700, marginBottom: 6 }}>Sin compras registradas</p>
+            <p style={{ color: C.sec, fontSize: 14 }}>Agrega tus compras en cuotas</p>
+          </Card>
+        )}
+
+        {/* Modal nueva compra */}
+        {compraModal && (
+          <Modal title="Nueva compra" onClose={() => { setCompraModal(false); setCf(emptyCf); }}>
+            <Inp label="Descripción *" placeholder="Ej: Televisor Samsung" value={cf.descripcion} onChange={e => setCf(x => ({ ...x, descripcion: e.target.value }))} />
+            <Inp label="Monto de la compra *" type="number" placeholder="0" value={cf.monto} onChange={e => setCf(x => ({ ...x, monto: e.target.value }))} />
+            <Inp label="Número de cuotas" type="number" placeholder="1" value={cf.cuotas} onChange={e => setCf(x => ({ ...x, cuotas: e.target.value }))} />
+            <Inp label="Fecha de compra" type="date" value={cf.fecha} onChange={e => setCf(x => ({ ...x, fecha: e.target.value }))} />
+            {cf.monto && cf.cuotas && (() => {
+              const cuotaMens = calcCuotaMensual(parseFloat(cf.monto) || 0, tasa, parseInt(cf.cuotas) || 1);
+              const total = cuotaMens * (parseInt(cf.cuotas) || 1);
+              const intereses = total - (parseFloat(cf.monto) || 0);
+              return (
+                <div style={{ background: C.surf2, borderRadius: 12, padding: "12px 14px", marginBottom: 14 }}>
+                  <p style={{ color: C.sec, fontSize: 11, letterSpacing: 0.8, marginBottom: 10 }}>RESUMEN</p>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><span style={{ color: C.sec, fontSize: 13 }}>Cuota mensual</span><span style={{ color: C.amber, fontWeight: 700 }}>{fmt(cuotaMens)}</span></div>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><span style={{ color: C.sec, fontSize: 13 }}>Total a pagar</span><span style={{ fontWeight: 700 }}>{fmt(total)}</span></div>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: C.sec, fontSize: 13 }}>Intereses totales</span><span style={{ color: C.red, fontWeight: 700 }}>{fmt(intereses)}</span></div>
+                </div>
+              );
+            })()}
+            <PrimaryBtn onClick={saveCompra} style={{ width: "100%" }}>Registrar compra</PrimaryBtn>
+          </Modal>
+        )}
+
+        {/* Modal pago mensual */}
+        {pagoModal && (
+          <Modal title="Registrar pago del mes" onClose={() => setPagoModal(false)}>
+            <InfoBox>
+              <p style={{ color: C.sec }}>Se marcará una cuota pagada en cada compra activa.</p>
+              <p style={{ color: C.amber, fontWeight: 700, marginTop: 6 }}>Total pago: {fmt(pagoMes)}</p>
+            </InfoBox>
+            {comprasActivas.map(c => (
+              <div key={c.id} style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                <span style={{ color: C.sec, fontSize: 13 }}>{c.descripcion}</span>
+                <span style={{ fontWeight: 700 }}>{fmt(calcCuotaMensual(c.monto, tasa, c.cuotas))}</span>
+              </div>
+            ))}
+            <PrimaryBtn onClick={savePago} color={C.green} style={{ width: "100%", marginTop: 10 }}>✓ Confirmar pago</PrimaryBtn>
+          </Modal>
+        )}
+
+        {/* Modal abono a capital */}
+        {abonoModal && (
+          <Modal title="Abono a capital" onClose={() => { setAbonoModal(null); setPf(emptyPf); }}>
+            {(() => {
+              const compra = comprasActivas.find(c => c.id === abonoModal);
+              if (!compra) return null;
+              const saldoActual = calcSaldoCompra(compra, tasa);
+              const cuotaAct = calcCuotaMensual(compra.monto, tasa, compra.cuotas);
+              const montoAbono = parseFloat(pf.monto) || 0;
+              const nuevoCuotasRest = montoAbono > 0 ? Math.max(0, calcCuotasRestantes(compra, tasa) - Math.floor(montoAbono / cuotaAct)) : calcCuotasRestantes(compra, tasa);
+              return (
+                <>
+                  <InfoBox>
+                    <p style={{ color: C.sec }}>Compra: <b>{compra.descripcion}</b></p>
+                    <p style={{ color: C.sec }}>Saldo actual: <b style={{ color: C.red }}>{fmt(saldoActual)}</b></p>
+                    <p style={{ color: C.sec }}>Cuotas restantes: <b>{calcCuotasRestantes(compra, tasa)}</b></p>
+                  </InfoBox>
+                  <Inp label="Monto del abono a capital *" type="number" placeholder="0" value={pf.monto} onChange={e => setPf(x => ({ ...x, monto: e.target.value }))} />
+                  <Inp label="Fecha" type="date" value={pf.fecha} onChange={e => setPf(x => ({ ...x, fecha: e.target.value }))} />
+                  {montoAbono > 0 && (
+                    <div style={{ background: `${C.green}14`, border: `0.5px solid ${C.green}44`, borderRadius: 10, padding: "10px 14px", marginBottom: 14 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                        <span style={{ color: C.sec, fontSize: 13 }}>Saldo después del abono</span>
+                        <span style={{ color: C.green, fontWeight: 700 }}>{fmt(Math.max(0, saldoActual - montoAbono))}</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span style={{ color: C.sec, fontSize: 13 }}>Cuotas que se eliminan</span>
+                        <span style={{ color: C.green, fontWeight: 700 }}>−{calcCuotasRestantes(compra, tasa) - nuevoCuotasRest} cuotas</span>
+                      </div>
+                    </div>
+                  )}
+                  <PrimaryBtn onClick={saveAbono} color={C.blue} style={{ width: "100%" }}>Registrar abono a capital</PrimaryBtn>
+                </>
+              );
+            })()}
+          </Modal>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div style={{ padding: "0 16px" }}>
@@ -1613,12 +1975,16 @@ function Cuentas({ data, saveData }) {
                     <p style={{ color: C.sec, fontSize: 12 }}>{ACCOUNT_LABELS[acc.tipo]}{subs.length > 0 ? ` · ${subs.length} bolsillos` : ""}</p>
                   </div>
                   <div style={{ textAlign: "right" }}>
-                    <p style={{ ...SORA, fontWeight: 700, fontSize: 18, color: realSaldo >= 0 ? acc.color : C.red }}>{fmt(realSaldo)}</p>
+                    <p style={{ ...SORA, fontWeight: 700, fontSize: 18, color: acc.tipo === "tarjeta_credito" ? C.red : realSaldo >= 0 ? acc.color : C.red }}>{acc.tipo === "tarjeta_credito" ? `-${fmt(Math.abs(realSaldo))}` : fmt(realSaldo)}</p>
                     <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4, alignItems: "center" }}>
-                      {subs.length > 0 && (
-                        <button onClick={() => setExpandedAcc(x => ({ ...x, [acc.id]: !x[acc.id] }))} style={{ background: "none", border: "none", color: C.sec, cursor: "pointer", fontSize: 13, padding: 0 }}>{isExpanded ? "▲" : "▼"}</button>
+                      {acc.tipo === "tarjeta_credito" ? (
+                        <button onClick={() => setTarjetaDetail(acc.id)} style={{ background: `${acc.color}22`, border: "none", color: acc.color, cursor: "pointer", fontSize: 11, padding: "3px 8px", borderRadius: 8, fontWeight: 700, ...DM }}>ver tarjeta</button>
+                      ) : (
+                        subs.length > 0 && (
+                          <button onClick={() => setExpandedAcc(x => ({ ...x, [acc.id]: !x[acc.id] }))} style={{ background: "none", border: "none", color: C.sec, cursor: "pointer", fontSize: 13, padding: 0 }}>{isExpanded ? "▲" : "▼"}</button>
+                        )
                       )}
-                      <button onClick={() => openSubModal(acc.id)} style={{ background: `${C.purple}22`, border: "none", color: C.purple, cursor: "pointer", fontSize: 11, padding: "3px 8px", borderRadius: 8, fontWeight: 700, ...DM }}>bolsillos</button>
+                      {acc.tipo !== "tarjeta_credito" && <button onClick={() => openSubModal(acc.id)} style={{ background: `${C.purple}22`, border: "none", color: C.purple, cursor: "pointer", fontSize: 11, padding: "3px 8px", borderRadius: 8, fontWeight: 700, ...DM }}>bolsillos</button>}
                       <button onClick={() => openEdit(acc)} style={{ background: "none", border: "none", color: C.blue, cursor: "pointer", fontSize: 14, padding: 0 }}>✏️</button>
                       <button onClick={() => deleteAcc(acc.id)} style={{ background: "none", border: "none", color: C.ter, cursor: "pointer", fontSize: 14, padding: 0 }}>🗑</button>
                     </div>
@@ -1682,10 +2048,27 @@ function Cuentas({ data, saveData }) {
             <option value="tarjeta_debito">💳 Tarjeta débito</option>
             <option value="tarjeta_credito">💳 Tarjeta crédito</option>
           </Sel>
-          {(() => { const acc = accounts.find(a => a.id === editAcc); return (acc?.subcuentas || []).length > 0; })() ? (
-            <InfoBox><p style={{ color: C.sec }}>El saldo se calcula automáticamente desde los bolsillos.</p></InfoBox>
+          {f.tipo === "tarjeta_credito" ? (
+            <div style={{ background: `${C.blue}14`, border: `0.5px solid ${C.blue}44`, borderRadius: 12, padding: "14px 14px 4px", marginBottom: 14 }}>
+              <p style={{ color: C.blue, fontSize: 11, fontWeight: 700, letterSpacing: 0.8, marginBottom: 12 }}>💳 DATOS DE LA TARJETA</p>
+              <Inp label="Cupo total" type="number" placeholder="Ej: 5000000" value={f.cupoTotal} onChange={e => setF(x => ({ ...x, cupoTotal: e.target.value }))} />
+              <Inp label="Tasa mensual del banco (%)" type="number" placeholder="Ej: 2.5" value={f.tasaMensual} onChange={e => setF(x => ({ ...x, tasaMensual: e.target.value }))} />
+              <div style={{ display: "flex", gap: 10 }}>
+                <div style={{ flex: 1 }}><Inp label="Día de corte" type="number" placeholder="15" value={f.diaCorte} onChange={e => setF(x => ({ ...x, diaCorte: e.target.value }))} /></div>
+                <div style={{ flex: 1 }}><Inp label="Días para pagar" type="number" placeholder="20" value={f.diasPago} onChange={e => setF(x => ({ ...x, diasPago: e.target.value }))} /></div>
+              </div>
+              {f.diaCorte && f.diasPago && (() => {
+                const mockAcc = { diaCorte: parseInt(f.diaCorte), diasPago: parseInt(f.diasPago) };
+                const { fechaCorte, fechaPago } = calcFechasPago(mockAcc);
+                return <InfoBox><p style={{ color: C.sec, fontSize: 12 }}>Próximo corte: <b>{fmtD(fechaCorte)}</b> · Límite de pago: <b>{fmtD(fechaPago)}</b></p></InfoBox>;
+              })()}
+            </div>
           ) : (
-            <Inp label="Saldo actual" type="number" placeholder="0" value={f.saldo} onChange={(e) => setF((x) => ({ ...x, saldo: e.target.value }))} />
+            (() => { const acc = accounts.find(a => a.id === editAcc); return (acc?.subcuentas || []).length > 0; })() ? (
+              <InfoBox><p style={{ color: C.sec }}>El saldo se calcula automáticamente desde los bolsillos.</p></InfoBox>
+            ) : (
+              <Inp label="Saldo actual" type="number" placeholder="0" value={f.saldo} onChange={(e) => setF((x) => ({ ...x, saldo: e.target.value }))} />
+            )
           )}
           <div style={{ marginBottom: 20 }}>
             <label style={{ fontSize: 12, color: C.sec, display: "block", marginBottom: 8 }}>Color</label>
