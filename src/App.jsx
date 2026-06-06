@@ -505,13 +505,14 @@ const InfoBox = ({ children }) => (
    BOTTOM NAV
 ═══════════════════════════════════════ */
 const NAV = [
-  { id: "dash", icon: "🏠", label: "Inicio" },
-  { id: "tx", icon: "💸", label: "Gastos" },
-  { id: "loans", icon: "🤝", label: "Préstamos" },
+  { id: "dash",     icon: "🏠", label: "Inicio" },
+  { id: "tx",       icon: "💸", label: "Gastos" },
+  { id: "loans",    icon: "🤝", label: "Préstamos" },
   { id: "accounts", icon: "🏦", label: "Cuentas" },
-  { id: "budget", icon: "📊", label: "Stats" },
-  { id: "goals", icon: "🎯", label: "Metas" },
-  { id: "tio", icon: "👴", label: "Mi Tío" },
+  { id: "budget",   icon: "📊", label: "Stats" },
+  { id: "goals",    icon: "🎯", label: "Metas" },
+  { id: "tio",      icon: "👴", label: "Mi Tío" },
+  { id: "ajustes",  icon: "⚙️", label: "Ajustes" },
 ];
 
 const BottomNav = ({ tab, setTab, badges = {} }) => (
@@ -529,6 +530,133 @@ const BottomNav = ({ tab, setTab, badges = {} }) => (
     ))}
   </div>
 );
+
+/* ═══════════════════════════════════════
+   SCREEN: AJUSTES
+═══════════════════════════════════════ */
+function Ajustes({ data, saveData }) {
+  const [importModal, setImportModal] = useState(false);
+  const [importError, setImportError] = useState("");
+  const [importOk, setImportOk] = useState(false);
+  const [pendingData, setPendingData] = useState(null);
+
+  // ── Exportar ──
+  const exportar = () => {
+    const fecha = new Date().toISOString().slice(0, 10);
+    const json = JSON.stringify(data, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `miscuentas-backup-${fecha}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // ── Leer archivo ──
+  const leerArchivo = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setImportError("");
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const parsed = JSON.parse(ev.target.result);
+        if (!parsed.transactions || !parsed.loans) throw new Error("Archivo inválido");
+        setPendingData(parsed);
+        setImportModal(true);
+      } catch {
+        setImportError("❌ El archivo no es un backup válido de MisCuentas.");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
+  // ── Confirmar importar ──
+  const confirmarImport = () => {
+    saveData(pendingData);
+    setImportModal(false);
+    setPendingData(null);
+    setImportOk(true);
+    setTimeout(() => setImportOk(false), 3000);
+  };
+
+  const totalTx = data.transactions.length;
+  const totalLoans = data.loans.length;
+  const totalCuentas = (data.accounts || []).length;
+  const fechaBackup = new Date().toLocaleDateString("es-CO", { day: "2-digit", month: "long", year: "numeric" });
+
+  return (
+    <div style={{ padding: "0 16px" }}>
+      <div style={{ padding: "52px 0 20px" }}>
+        <p style={{ fontSize: 22, fontWeight: 700, ...SORA }}>⚙️ Ajustes</p>
+        <p style={{ color: C.sec, fontSize: 13 }}>Gestiona tus datos y preferencias</p>
+      </div>
+
+      {/* Resumen de datos */}
+      <Card style={{ marginBottom: 16 }}>
+        <p style={{ fontWeight: 700, fontSize: 15, marginBottom: 14 }}>📊 Resumen de tus datos</p>
+        {[
+          { icon: "💸", label: "Transacciones", valor: totalTx },
+          { icon: "🤝", label: "Préstamos", valor: totalLoans },
+          { icon: "🏦", label: "Cuentas", valor: totalCuentas },
+          { icon: "🎯", label: "Metas", valor: (data.goals || []).length },
+        ].map((r) => (
+          <div key={r.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <span style={{ color: C.sec, fontSize: 14 }}>{r.icon} {r.label}</span>
+            <span style={{ fontWeight: 700, fontSize: 14 }}>{r.valor} registros</span>
+          </div>
+        ))}
+      </Card>
+
+      {/* Exportar */}
+      <Card style={{ marginBottom: 12 }}>
+        <p style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>📤 Exportar datos</p>
+        <p style={{ color: C.sec, fontSize: 13, marginBottom: 16 }}>Descarga un archivo con todos tus datos. Guárdalo en iCloud, Google Drive o donde prefieras.</p>
+        <div style={{ background: C.surf2, borderRadius: 10, padding: "10px 14px", marginBottom: 14 }}>
+          <p style={{ color: C.sec, fontSize: 12 }}>El archivo incluye: transacciones, préstamos, cuentas, metas, presupuestos y módulo Tío.</p>
+          <p style={{ color: C.green, fontSize: 12, marginTop: 4, fontWeight: 700 }}>📅 Hoy: {fechaBackup}</p>
+        </div>
+        <PrimaryBtn onClick={exportar} style={{ width: "100%" }}>📤 Descargar backup</PrimaryBtn>
+      </Card>
+
+      {/* Importar */}
+      <Card style={{ marginBottom: 12 }}>
+        <p style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>📥 Importar datos</p>
+        <p style={{ color: C.sec, fontSize: 13, marginBottom: 16 }}>Restaura un backup anterior. <b style={{ color: C.red }}>Esto reemplazará todos tus datos actuales.</b></p>
+        <label style={{ display: "block", background: `${C.blue}22`, border: `1px dashed ${C.blue}88`, borderRadius: 12, padding: "16px", textAlign: "center", cursor: "pointer" }}>
+          <span style={{ fontSize: 28, display: "block", marginBottom: 6 }}>📂</span>
+          <span style={{ color: C.blue, fontWeight: 700, fontSize: 14 }}>Seleccionar archivo .json</span>
+          <input type="file" accept=".json" onChange={leerArchivo} style={{ display: "none" }} />
+        </label>
+        {importError && <p style={{ color: C.red, fontSize: 13, marginTop: 10, textAlign: "center" }}>{importError}</p>}
+        {importOk && <p style={{ color: C.green, fontSize: 13, marginTop: 10, textAlign: "center", fontWeight: 700 }}>✅ Datos restaurados correctamente</p>}
+      </Card>
+
+      {/* Aviso importante */}
+      <div style={{ background: `${C.amber}14`, border: `1px solid ${C.amber}44`, borderRadius: 12, padding: "14px 16px", marginBottom: 24 }}>
+        <p style={{ fontWeight: 700, fontSize: 13, color: C.amber, marginBottom: 6 }}>⚠️ Importante sobre tus datos</p>
+        <p style={{ color: C.sec, fontSize: 12, lineHeight: 1.6 }}>Tus datos se guardan en este dispositivo. Si desinstalar la app o borras el caché del navegador, los perderás. <b>Haz backup frecuente</b> para no perder nada.</p>
+      </div>
+
+      {/* Modal confirmación importar */}
+      {importModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.78)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div style={{ background: C.surf, borderRadius: 20, padding: 28, width: "100%", maxWidth: 360, textAlign: "center" }}>
+            <span style={{ fontSize: 44, display: "block", marginBottom: 12 }}>⚠️</span>
+            <p style={{ fontWeight: 700, fontSize: 18, marginBottom: 8, ...SORA }}>¿Restaurar backup?</p>
+            <p style={{ color: C.sec, fontSize: 14, marginBottom: 24, lineHeight: 1.6 }}>Esto <b style={{ color: C.red }}>borrará todos tus datos actuales</b> y los reemplazará con los del archivo. Esta acción no se puede deshacer.</p>
+            <div style={{ display: "flex", gap: 10 }}>
+              <PrimaryBtn color={C.red} onClick={confirmarImport} style={{ flex: 1 }}>Sí, restaurar</PrimaryBtn>
+              <PrimaryBtn outline color={C.sec} onClick={() => { setImportModal(false); setPendingData(null); }} style={{ flex: 1 }}>Cancelar</PrimaryBtn>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /* ═══════════════════════════════════════
    SCREEN: DASHBOARD
@@ -2523,13 +2651,14 @@ export default function App() {
   const badges = alertas.reduce((acc, a) => { acc[a.tab] = (acc[a.tab] || 0) + 1; return acc; }, {});
 
   const screens = {
-    dash: <Dashboard data={data} setTab={setTabSafe} />,
-    tx: <Transacciones data={data} saveData={saveData} />,
-    loans: <Prestamos data={data} saveData={saveData} />,
+    dash:     <Dashboard data={data} setTab={setTabSafe} />,
+    tx:       <Transacciones data={data} saveData={saveData} />,
+    loans:    <Prestamos data={data} saveData={saveData} />,
     accounts: <Cuentas data={data} saveData={saveData} />,
-    budget: <Presupuesto data={data} saveData={saveData} />,
-    goals: <Metas data={data} saveData={saveData} />,
-    tio: <Tio data={data} saveData={saveData} />,
+    budget:   <Presupuesto data={data} saveData={saveData} />,
+    goals:    <Metas data={data} saveData={saveData} />,
+    tio:      <Tio data={data} saveData={saveData} />,
+    ajustes:  <Ajustes data={data} saveData={saveData} />,
   };
 
   return (
